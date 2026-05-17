@@ -78,7 +78,7 @@ class PhoBertMultitaskService:
 				str(root_dir / "checkpoint-3824-20260411T075134Z-3-002" / "checkpoint-3824"),
 			)
 		)
-		default_repo_id = os.getenv("PHOBERT_MULTITASK_MODEL_ID", "usernone1234/phobert-multitask")
+		default_repo_id = os.getenv("PHOBERT_MULTITASK_MODEL_ID") or None
 		self.device = torch.device("cpu")
 		local_source = Path(model_path) if model_path else default_local_path
 		self.model_path = self._resolve_path(

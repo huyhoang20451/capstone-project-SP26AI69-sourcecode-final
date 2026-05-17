@@ -454,11 +454,7 @@
                 return '';
             }
 
-            return `<div class="flex flex-wrap items-center gap-2 text-xs">
-                    ${hasLLMEmotion ? `<div class="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full font-medium bg-rose-100 text-rose-800 border border-rose-200">
-                        <i class="fa-solid fa-heart-pulse text-[10px]"></i>
-                        <span>LLM: ${llmEmotion}</span>
-                    </div>` : ''}
+            return `<div class="flex items-center gap-2">
                     ${hasMLEmotion ? `<div class="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full font-medium bg-sky-100 text-sky-800 border border-sky-200">
                         <i class="fa-solid fa-brain text-[10px]"></i>
                         <span>${emotionModelUsed}: ${mlDetailEmotion}</span>

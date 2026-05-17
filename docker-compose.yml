@@ -40,8 +40,8 @@ services:
       DATABASE_URL: postgresql://postgres:Hoang399100@db:5432/web_emotion_chat
       OLLAMA_BASE_URL: http://ollama:11434
       DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:-tamly-model-withoutemotion}
-      PHOBERT_MULTITASK_MODEL_ID: ${PHOBERT_MULTITASK_MODEL_ID:-usernone1234/phobert-multitask}
-      WHISPER_MODEL_ID: ${WHISPER_MODEL_ID:-usernone1234/whisper-vi-audio}
+      PHOBERT_MULTITASK_MODEL_ID: ${PHOBERT_MULTITASK_MODEL_ID:-}
+      WHISPER_MODEL_ID: ${WHISPER_MODEL_ID:-}
       HF_HOME: /root/.cache/huggingface
     ports:
       - "8000:8000"

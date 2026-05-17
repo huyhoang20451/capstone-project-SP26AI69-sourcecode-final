@@ -10,12 +10,10 @@ class WhisperService:
 	def __init__(self, model_dir: str | None = None, language: str = "vi"):
 		root_dir = Path(__file__).resolve().parents[2]
 		default_local_dir = Path(os.getenv("WHISPER_MODEL_DIR", str(root_dir / "whisper_vi_final_model")))
-		default_repo_id = os.getenv("WHISPER_MODEL_ID", "usernone1234/whisper-vi-audio")
 
-		local_source = Path(model_dir) if model_dir else default_local_dir
-		self.model_dir = self._resolve_model_dir(
-			resolve_model_source(repo_id=default_repo_id, local_path=local_source)
-		)
+		self._local_source = Path(model_dir) if model_dir else default_local_dir
+		self._repo_id = os.getenv("WHISPER_MODEL_ID") or None
+		self.model_dir: Path | None = None
 		self.language = language
 
 		self._pipe = None
@@ -26,6 +24,14 @@ class WhisperService:
 			return path
 		raise FileNotFoundError(f"Không tìm thấy thư mục model Whisper tại: {path}")
 
+	def _get_model_dir(self) -> Path:
+		if self.model_dir is None:
+			self.model_dir = self._resolve_model_dir(
+				resolve_model_source(repo_id=self._repo_id, local_path=self._local_source)
+			)
+
+		return self.model_dir
+
 	def _build_pipeline(self):
 		try:
 			import torch
@@ -35,23 +41,20 @@ class WhisperService:
 				"Thiếu thư viện cho Whisper. Hãy cài torch và transformers."
 			) from exc
 
-		if not self.model_dir.exists():
-			raise FileNotFoundError(
-				f"Không tìm thấy thư mục model Whisper tại: {self.model_dir}"
-			)
+		model_dir = self._get_model_dir()
 
 		use_cuda = torch.cuda.is_available()
 		device = 0 if use_cuda else -1
 		dtype = torch.float16 if use_cuda else torch.float32
 
 		model = AutoModelForSpeechSeq2Seq.from_pretrained(
-			str(self.model_dir),
+			str(model_dir),
 			torch_dtype=dtype,
 			low_cpu_mem_usage=True,
 			use_safetensors=True,
 		)
 
-		processor = AutoProcessor.from_pretrained(str(self.model_dir))
+		processor = AutoProcessor.from_pretrained(str(model_dir))
 
 		return pipeline(
 			"automatic-speech-recognition",
