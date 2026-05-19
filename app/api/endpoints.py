@@ -1,7 +1,8 @@
 import os
 import tempfile
 import json
-from fastapi import APIRouter, Depends, Request, UploadFile, File
+import uuid
+from fastapi import APIRouter, Depends, Request, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import StreamingResponse
@@ -139,10 +140,17 @@ async def consult_api_stream(data: UserInput, db: Session = Depends(get_db)):
     ml_emotion = ml_result.get("emotion", "Không xác định")
     ml_detail_emotion = ml_result.get("detail_emotion", ml_emotion)
 
+    current_user_id = getattr(data, 'user_id', 'hoang_dev_user') 
+    session_conv_id = str(data.conversation_id) if data.conversation_id else f"new_chat_{uuid.uuid4().hex[:8]}"
+    
     async def event_generator():
         final_event = None
-
-        async for event in llm_service.generate_response_stream(data.message, data.model):
+        
+        async for event in llm_service.generate_response_stream(
+            message = data.message,
+            user_id = current_user_id,
+            conversation_id = session_conv_id,
+            model_name = data.model):
             event_type = event.get("type")
 
             if event_type == "chunk":
@@ -244,17 +252,16 @@ async def transcribe_voice(file: UploadFile = File(...)):
     if not raw_data:
         return {"status": "error", "message": "Không nhận được dữ liệu audio."}
 
-    temp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as temp_file:
-            temp_file.write(raw_data)
-            temp_path = temp_file.name
-
-        result = await run_in_threadpool(whisper_service.transcribe_file, Path(temp_path))
+        result = await run_in_threadpool(whisper_service.transcribe_audio, raw_data)
         return result
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+    except OSError as exc:
+        if getattr(exc, "errno", None) == 28:
+            raise HTTPException(
+                status_code=507,
+                detail="Không đủ dung lượng để xử lý audio trong bộ nhớ hoặc tạm.",
+            ) from exc
+        raise
 
 @router.get("/api/history")
 async def list_history(db: Session = Depends(get_db)):
@@ -332,3 +339,122 @@ async def delete_chat(chat_id: int, db: Session = Depends(get_db)):
     db.delete(conversation)
     db.commit()
     return {"status": "success", "message": "Đã xóa hội thoại"}
+
+@router.websocket("/ws/chat")
+async def websocket_chat_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
+    await websocket.accept()
+    
+    try:
+        while True:
+            # 1. Nhận data từ Frontend gửi lên qua Socket
+            data_str = await websocket.receive_text()
+            payload = json.loads(data_str)
+            
+            message = payload.get("message", "")
+            if not message:
+                continue
+                
+            model = payload.get("model")
+            emotion_model = payload.get("emotion_model")
+            conversation_id = payload.get("conversation_id")
+            
+            # Lấy định danh người dùng (Memori)
+            current_user_id = payload.get("user_id", "hoang_dev_user")
+            session_conv_id = str(conversation_id) if conversation_id else f"ws_chat_{uuid.uuid4().hex[:8]}"
+
+            # 2. Xử lý ML Emotion song song (Fallback)
+            selected_emotion_model_key = _resolve_emotion_model_key(emotion_model)
+            ml_result, warning = _predict_emotion_with_fallback(message, selected_emotion_model_key)
+
+            ml_emotion = ml_result.get("emotion", "Không xác định")
+            ml_detail_emotion = ml_result.get("detail_emotion", ml_emotion)
+
+            # 3. Gọi LLM Stream
+            final_event = None
+            async for event in llm_service.generate_response_stream(
+                message=message,
+                user_id=current_user_id,
+                conversation_id=session_conv_id,
+                model_name=model
+            ):
+                event_type = event.get("type")
+
+                if event_type == "chunk":
+                    await websocket.send_json({
+                        "type": "chunk",
+                        "content": event.get("content", ""),
+                    })
+                    continue
+
+                if event_type == "error":
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": event.get("message", "Unknown error"),
+                    })
+                    break # Dừng stream nếu lỗi
+
+                if event_type == "final":
+                    final_event = event
+                    break
+
+            # 4. Xử lý sau khi stream xong (Lưu DB & Tính toán thêm)
+            if final_event:
+                llm_emotion = final_event.get("emotion", "Bình thường")
+                advice = final_event.get("advice", "")
+
+                emotion_similarity = None
+                try:
+                    embedder = ml_emotion_service._get_embedder()
+                    emotion_similarity = await llm_service.calculate_cosine_similarity_between_two_labels(
+                        llm_emotion,
+                        ml_detail_emotion,
+                        embedder,
+                    )
+                except Exception:
+                    emotion_similarity = None
+
+                # Lưu Database
+                history = history_service.save_chat(
+                    db=db,
+                    user_msg=message,
+                    ai_res=advice,
+                    emotion=llm_emotion,
+                    ml_detail_emotion=ml_detail_emotion,
+                    conversation_id=conversation_id,
+                    emotion_model_used=EMOTION_MODELS.get(selected_emotion_model_key, {}).get("name", "Machine Learning"),
+                )
+
+                conversation, assistant_message = history
+
+                # Gửi cục data cuối cùng chốt hạ
+                await websocket.send_json({
+                    "type": "done",
+                    "data": {
+                        "emotion": llm_emotion,
+                        "llm_emotion": llm_emotion,
+                        "ml_emotion": ml_emotion,
+                        "ml_detail_emotion": ml_detail_emotion,
+                        "advice": advice,
+                        "show_emotion": final_event.get("show_emotion", True),
+                        "reliability_score": final_event.get("reliability_score", 1.0),
+                        "emotion_similarity": emotion_similarity,
+                        "model_used": final_event.get("model_used"),
+                        "emotion_model_used": EMOTION_MODELS.get(selected_emotion_model_key, {}).get("name", "Machine Learning"),
+                        "emotion_model_warning": warning,
+                        "history_id": conversation.id,
+                        "message_id": assistant_message.id,
+                    },
+                })
+            elif not final_event:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Không nhận được phản hồi cuối từ LLM.",
+                })
+
+    except WebSocketDisconnect:
+        print("Client disconnected from WebSocket")
+    except Exception as e:
+        await websocket.send_json({
+            "type": "error",
+            "message": f"Server error: {str(e)}"
+        })

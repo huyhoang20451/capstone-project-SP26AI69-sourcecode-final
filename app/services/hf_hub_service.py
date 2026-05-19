@@ -12,7 +12,7 @@ def resolve_model_source(
 	local_path: str | Path | None = None,
 ) -> Path:
 	if local_path is not None:
-    		candidate = Path(local_path).expanduser()
+		candidate = Path(local_path).expanduser()
 		if candidate.exists():
 			return candidate
 

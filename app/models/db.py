@@ -6,6 +6,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.exc import OperationalError
 from dotenv import load_dotenv
+from memori import Memori
 
 # 1. Nạp file .env ngay khi khởi động
 load_dotenv()
@@ -35,6 +36,7 @@ engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+mem = Memori(conn=SessionLocal())
 # --- Models ---
 
 class Conversation(Base):
@@ -85,6 +87,7 @@ def init_db():
     # Tạo bảng nếu chưa tồn tại
     Base.metadata.create_all(bind=engine)
 
+    mem.config.storage.build()
 def get_db():
     db = SessionLocal()
     try:

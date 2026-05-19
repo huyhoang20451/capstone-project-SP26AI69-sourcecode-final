@@ -25,4 +25,6 @@ ENABLED_EMOTION_MODELS = [
 
 # LLM Configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "tamly-model-withoutemotion")
+DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "qwen2.5-1.5b-chat-tamly-markdown-withemotion:latest")
+WHISPER_MODEL_ID = os.getenv("WHISPER_MODEL_ID", "usernone1234/whisper-vi-audio")
+WHISPER_TEMP_DIR = os.getenv("WHISPER_TEMP_DIR", "")

@@ -110,6 +110,8 @@
         let sttRecorder = null;
         let sttStream = null;
         let sttChunks = [];
+        let ws = null;
+        let wsReady = false;
 
         const welcomeMessageHtml = `
             <div class="flex gap-4 max-w-3xl mx-auto">
@@ -509,6 +511,35 @@
             }
         }
 
+        function connectWebSocket() {
+            return new Promise((resolve) => {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
+                
+                try {
+                    ws = new WebSocket(wsUrl);
+                    ws.onopen = () => {
+                        wsReady = true;
+                        console.log('✅ WebSocket kết nối thành công');
+                        resolve(true);
+                    };
+                    ws.onerror = (error) => {
+                        console.error('❌ WebSocket lỗi:', error);
+                        wsReady = false;
+                        resolve(false);
+                    };
+                    ws.onclose = () => {
+                        console.log('WebSocket đóng');
+                        wsReady = false;
+                    };
+                } catch (error) {
+                    console.error('❌ Lỗi tạo WebSocket:', error);
+                    wsReady = false;
+                    resolve(false);
+                }
+            });
+        }
+
         async function handleSend() {
             const message = userInput.value.trim();
             const selectedModel = modelSelect ? modelSelect.value : null;
@@ -526,67 +557,56 @@
             let donePayload = null;
 
             try {
-                const response = await fetch('/consult-api/stream', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        message: message,
-                        model: selectedModel,
-                        emotion_model: selectedEmotionModel,
-                        conversation_id: activeConversationId
-                    })
+                // Kiểm tra kết nối WebSocket, nếu chưa có thì tạo mới
+                if (!wsReady) {
+                    const connected = await connectWebSocket();
+                    if (!connected) {
+                        throw new Error('Không thể kết nối đến server qua WebSocket.');
+                    }
+                }
+
+                // Thiết lập message handler cho phản hồi
+                let messageHandler = null;
+                const messagePromise = new Promise((resolve) => {
+                    messageHandler = (event) => {
+                        try {
+                            const payload = JSON.parse(event.data);
+                            
+                            if (payload.type === 'chunk') {
+                                streamedText += payload.content || '';
+                                updateStreamingBotMessage(streamNode, streamedText);
+                                return;
+                            }
+
+                            if (payload.type === 'error') {
+                                throw new Error(payload.message || 'Lỗi từ server.');
+                            }
+
+                            if (payload.type === 'done') {
+                                donePayload = payload.data || {};
+                                ws.removeEventListener('message', messageHandler);
+                                resolve();
+                            }
+                        } catch (error) {
+                            console.error('Lỗi parse WebSocket message:', error);
+                        }
+                    };
+                    ws.addEventListener('message', messageHandler);
                 });
 
                 removeLoading(loadingId);
-
-                if (!response.ok || !response.body) {
-                    throw new Error('Streaming response không hợp lệ từ server.');
-                }
-
                 streamNode = createStreamingBotMessage();
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder('utf-8');
-                let buffer = '';
 
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
+                // Gửi message qua WebSocket
+                ws.send(JSON.stringify({
+                    message: message,
+                    model: selectedModel,
+                    emotion_model: selectedEmotionModel,
+                    conversation_id: activeConversationId
+                }));
 
-                    buffer += decoder.decode(value, { stream: true });
-                    const events = buffer.split('\n\n');
-                    buffer = events.pop() || '';
-
-                    for (const eventChunk of events) {
-                        const dataLine = eventChunk
-                            .split('\n')
-                            .find((line) => line.startsWith('data: '));
-
-                        if (!dataLine) {
-                            continue;
-                        }
-
-                        let payload;
-                        try {
-                            payload = JSON.parse(dataLine.slice(6));
-                        } catch (error) {
-                            continue;
-                        }
-
-                        if (payload.type === 'chunk') {
-                            streamedText += payload.content || '';
-                            updateStreamingBotMessage(streamNode, streamedText);
-                            continue;
-                        }
-
-                        if (payload.type === 'error') {
-                            throw new Error(payload.message || 'Lỗi stream từ server.');
-                        }
-
-                        if (payload.type === 'done') {
-                            donePayload = payload.data || {};
-                        }
-                    }
-                }
+                // Chờ cho đến khi nhận được phản hồi cuối
+                await messagePromise;
 
                 if (!donePayload) {
                     finalizeStreamingBotMessage(streamNode, streamedText || '');
@@ -618,7 +638,13 @@
                 if (streamNode) {
                     finalizeStreamingBotMessage(streamNode, streamedText || '');
                 }
-                appendMessage('bot', 'Rất tiếc, đã có lỗi kết nối đến server. Bạn kiểm tra lại backend nhé!');
+                appendMessage('bot', `Rất tiếc, đã có lỗi kết nối đến server. ${error.message || 'Bạn kiểm tra lại backend nhé!'}`);
+                // Đóng kết nối WebSocket lỗi, sẽ tạo lại lần sau
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                    wsReady = false;
+                }
             }
         }
 
@@ -698,6 +724,8 @@
             });
         }
 
+        // Khởi tạo WebSocket khi trang load
+        connectWebSocket();
         loadHistoryList();
     </script>
 </body>

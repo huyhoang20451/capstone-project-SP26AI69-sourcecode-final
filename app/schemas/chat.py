@@ -6,6 +6,7 @@ class UserInput(BaseModel):
     model: Optional[str] = "qwen2.5-1.5b-chat-tamly-no-emotion:latest"
     emotion_model: Optional[str] = "default"
     conversation_id: Optional[int] = None
+    user_id: Optional[str] = "guest_user"
 
 class ChatResponse(BaseModel):
     emotion: str
@@ -14,3 +15,4 @@ class ChatResponse(BaseModel):
 
 class EmotionPredictRequest(BaseModel):
     message: str
+    emotion_model: Optional[str] = "default"
