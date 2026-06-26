@@ -217,3 +217,5 @@ Gradio will print a local URL (e.g. `http://127.0.0.1:7860`) and optionally a pu
 | `ModuleNotFoundError: underthesea` | Missing dependency | Run `pip install -r requirements.txt` again |
 | Slow inference on CPU | No GPU / CUDA | Expected — CPU inference is slower; GPU recommended for real-time use |
 | Gradio won't load on HF Spaces | Whisper init fails | Ensure `WHISPER_LOCAL_MODEL_DIR` env var is **not** set on Spaces |
+
+Video Demo: https://www.youtube.com/watch?v=LTGJZFM0gTo
